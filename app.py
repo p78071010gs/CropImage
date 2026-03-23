@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 import io
+import base64
 from datetime import datetime
 
 st.set_page_config(page_title="梯形裁剪工具", page_icon="✂️", layout="wide")
@@ -63,6 +64,13 @@ def img_to_bytes(img_bgr, fmt="jpg"):
     else:
         _, buf = cv2.imencode(".bmp", img_bgr)
     return buf.tobytes()
+
+def pil_to_data_url(pil_img: Image.Image) -> str:
+    """Convert a PIL Image to a base64 PNG data URL (avoids Streamlit version incompatibility)."""
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/png;base64,{b64}"
 
 def calc_canvas_size(img_w, img_h, max_w=820):
     if img_w > max_w:
@@ -204,7 +212,7 @@ with col_canvas:
         fill_color   = "rgba(0,0,0,0)",
         stroke_color = "#00c8ff",
         stroke_width = 2,
-        background_image = bg_img,
+        background_image = pil_to_data_url(bg_img),
         update_streamlit = True,
         width  = cW,
         height = cH,
