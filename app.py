@@ -55,18 +55,36 @@ def pil_b64(img, fmt="JPEG", q=85):
 
 def draw_overlay(bgr, pts):
     img = bgr.copy(); n = len(pts)
+    # 連線框
     for i in range(n-1):
         cv2.line(img,(int(pts[i][0]),int(pts[i][1])),
                      (int(pts[i+1][0]),int(pts[i+1][1])),(0,200,255),2,cv2.LINE_AA)
     if n == 4:
         cv2.line(img,(int(pts[3][0]),int(pts[3][1])),
                      (int(pts[0][0]),int(pts[0][1])),(0,200,255),2,cv2.LINE_AA)
-    for i,pt in enumerate(pts):
-        x,y = int(pt[0]),int(pt[1])
-        cv2.circle(img,(x,y),12,CV_COLS[i],-1)
-        cv2.circle(img,(x,y),12,(255,255,255),2,cv2.LINE_AA)
-        cv2.putText(img, CV_LABELS[i], (x+15, y+5),
-                    cv2.FONT_HERSHEY_SIMPLEX, .65, (255,255,255), 2, cv2.LINE_AA)
+    # 角點：小十字準心 + 彩色標籤框
+    for i, pt in enumerate(pts):
+        x, y = int(pt[0]), int(pt[1])
+        col  = CV_COLS[i]
+        arm  = 7  # 十字臂長（px）
+        # 白底十字（增加對比）
+        cv2.line(img,(x-arm,y),(x+arm,y),(255,255,255),3,cv2.LINE_AA)
+        cv2.line(img,(x,y-arm),(x,y+arm),(255,255,255),3,cv2.LINE_AA)
+        # 彩色十字
+        cv2.line(img,(x-arm,y),(x+arm,y),col,2,cv2.LINE_AA)
+        cv2.line(img,(x,y-arm),(x,y+arm),col,2,cv2.LINE_AA)
+        # 中心圓點
+        cv2.circle(img,(x,y),3,(255,255,255),-1)
+        cv2.circle(img,(x,y),2,col,-1)
+        # 標籤背景框
+        label = CV_LABELS[i]
+        (tw,th),_ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        pad = 3
+        bx, by = x+10, y-th-pad*2-2
+        cv2.rectangle(img,(bx-pad,by-pad),(bx+tw+pad,by+th+pad),col,-1)
+        cv2.rectangle(img,(bx-pad,by-pad),(bx+tw+pad,by+th+pad),(255,255,255),1,cv2.LINE_AA)
+        cv2.putText(img,label,(bx,by+th),
+                    cv2.FONT_HERSHEY_SIMPLEX,0.5,(255,255,255),1,cv2.LINE_AA)
     return img
 
 def resize_for_display(bgr, max_w=MAX_DISPLAY_W):
