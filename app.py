@@ -174,32 +174,47 @@ with col_img:
             st.warning("請安裝 `streamlit-image-coordinates` 套件以啟用點擊功能：\n```\npip install streamlit-image-coordinates\n```")
 
 with col_ctrl:
-    st.markdown("#### 📍 角點座標（原圖 px）")
+    st.markdown("#### 📍 角點座標微調（原圖 px）")
+
     if n == 0:
-        st.caption("尚未選取任何點")
+        st.caption("尚未選取任何點，請先在圖片上點擊。")
     else:
-        rows = "".join(
-            f"<tr><td><span class='dot' style='background:{COLORS[i]}'></span>{LABELS[i]}</td>"
-            f"<td>{int(p[0])}</td><td>{int(p[1])}</td></tr>"
-            for i,p in enumerate(pts)
-        )
-        st.markdown(f"""
-<table class='coord-table'>
-  <thead><tr><th>角點</th><th>X</th><th>Y</th></tr></thead>
-  <tbody>{rows}</tbody>
-</table>""", unsafe_allow_html=True)
+        changed = False
+        for i, p in enumerate(pts):
+            dot = f"<span style='display:inline-block;width:11px;height:11px;" \
+                  f"border-radius:50%;background:{COLORS[i]};margin-right:6px;" \
+                  f"vertical-align:middle;'></span>"
+            st.markdown(f"{dot}**{LABELS[i]}**", unsafe_allow_html=True)
+            cx, cy = st.columns(2)
+            with cx:
+                new_x = st.number_input(
+                    "X", min_value=0, max_value=W-1,
+                    value=int(p[0]), step=1,
+                    key=f"nx_{i}", label_visibility="visible")
+            with cy:
+                new_y = st.number_input(
+                    "Y", min_value=0, max_value=H-1,
+                    value=int(p[1]), step=1,
+                    key=f"ny_{i}", label_visibility="visible")
+            if new_x != int(p[0]) or new_y != int(p[1]):
+                st.session_state.pts[i] = [new_x, new_y]
+                changed = True
+
+        if changed:
+            st.session_state.result = None
+            st.rerun()
 
     st.markdown("---")
     st.markdown("#### 🎛️ 操作")
-    bc1,bc2 = st.columns(2)
+    bc1, bc2 = st.columns(2)
     with bc1:
-        if st.button("🔄 重設點位", use_container_width=True, disabled=(n==0)):
+        if st.button("🔄 重設點位", use_container_width=True, disabled=(n == 0)):
             st.session_state.pts    = []
             st.session_state.result = None
             st.rerun()
     with bc2:
         prev_btn = st.button("👁️ 預覽截圖", use_container_width=True,
-                             type="primary", disabled=(n<4))
+                             type="primary", disabled=(n < 4))
 
     if prev_btn and n == 4:
         with st.spinner("透視校正中..."):
@@ -208,22 +223,22 @@ with col_ctrl:
     st.markdown("---")
     st.markdown("#### ✂️ 裁剪結果")
     if st.session_state.result is None:
-        hint = "點圖選 4 個角點後點「預覽截圖」" if n<4 else "點擊「👁️ 預覽截圖」"
+        hint = "點圖選 4 個角點後點「預覽截圖」" if n < 4 else "點擊「👁️ 預覽截圖」"
         st.markdown(f"""<div style='background:#1e293b;border-radius:8px;padding:30px;
             text-align:center;color:#475569;'>
             <div style='font-size:32px'>🖼️</div>
             <div style='margin-top:8px;font-size:12px'>{hint}</div></div>""",
             unsafe_allow_html=True)
     else:
-        res   = st.session_state.result
-        rH,rW = res.shape[:2]
+        res    = st.session_state.result
+        rH, rW = res.shape[:2]
         st.success(f"輸出：{rW} × {rH} px")
-        st.image(cv2.cvtColor(res,cv2.COLOR_BGR2RGB), use_container_width=True)
+        st.image(cv2.cvtColor(res, cv2.COLOR_BGR2RGB), use_container_width=True)
         fe  = (fmt if "fmt" in dir() else "JPG").lower()
         ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
         st.download_button(
             label=f"⬇️ 下載 {fe.upper()}",
-            data=encode_result(res,fe),
+            data=encode_result(res, fe),
             file_name=f"{fname}_crop_{ts}.{fe}",
             mime={"jpg":"image/jpeg","png":"image/png","bmp":"image/bmp"}.get(fe,"image/jpeg"),
             use_container_width=True, type="primary")
