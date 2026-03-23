@@ -44,6 +44,7 @@ CV_COLS  = [(255,200,0),(100,255,100),(0,180,255),(180,80,255)]
 LABELS   = ["TL 左上","TR 右上","BR 右下","BL 左下"]
 CV_LABELS= ["TL","TR","BR","BL"]   # OpenCV putText 用（純 ASCII）
 MAX_DISPLAY_W = 1400   # 放寬上限，讓圖片盡量填滿全寬
+SIC_DISPLAY_W = 1100   # streamlit-image-coordinates 固定渲染寬度（與 scale 對齊）
 
 # ─────────────────────────────────────────────
 def pil_b64(img, fmt="JPEG", q=85):
@@ -220,17 +221,18 @@ if n < 4:
 else:
     st.markdown("**✅ 已選取 4 個角點 — 可在左側輸入框微調，或點「👁️ 預覽截圖」**")
 
-# 繪製 overlay
-disp_bgr, scale = resize_for_display(original)
+# 繪製 overlay — 用固定寬度 SIC_DISPLAY_W 確保 scale 與點擊座標一致
+disp_bgr, scale = resize_for_display(original, max_w=SIC_DISPLAY_W)
 disp_pts = [[p[0]*scale, p[1]*scale] for p in pts]
 if pts:
     disp_bgr = draw_overlay(disp_bgr, disp_pts)
 
 disp_rgb = cv2.cvtColor(disp_bgr, cv2.COLOR_BGR2RGB)
 disp_pil = Image.fromarray(disp_rgb)
+disp_w   = disp_pil.width   # 實際傳給元件的寬度
 
 if USE_SIC and n < 4:
-    coord = streamlit_image_coordinates(disp_pil, key=f"sic_{n}", use_column_width=True)
+    coord = streamlit_image_coordinates(disp_pil, key=f"sic_{n}", width=disp_w)
     if coord is not None:
         ox = max(0, min(W-1, int(round(coord["x"] / scale))))
         oy = max(0, min(H-1, int(round(coord["y"] / scale))))
