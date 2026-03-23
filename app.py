@@ -14,7 +14,7 @@ from streamlit_plotly_events import plotly_events
 
 st.set_page_config(page_title="梯形裁剪工具", page_icon="✂️", layout="wide")
 
-for k,v in [("pts",[]),("last_file",None),("result",None)]:
+for k,v in [("pts",[]),("last_file",None),("result",None),("last_click",None)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -196,16 +196,20 @@ with col_img:
     fig = make_plotly_fig(original, pts, W, H, clickable=(n<4))
 
     if n < 4:
-        # plotly_events returns list of {x, y, curveNumber, pointNumber} on click
+        # Use a fixed key so the component is NOT recreated on rerun
         clicked = plotly_events(fig, click_event=True, hover_event=False,
-                                select_event=False, key=f"plot_{n}")
+                                select_event=False, key="plotly_click")
         if clicked:
             cx = clicked[0]["x"]
             cy = H - clicked[0]["y"]   # plotly y is flipped
             cx = max(0, min(W-1, int(round(cx))))
             cy = max(0, min(H-1, int(round(cy))))
-            st.session_state.pts.append([cx, cy])
-            st.rerun()
+            # Deduplicate: only append if this click differs from the last one
+            new_pt = [cx, cy]
+            if new_pt != st.session_state.last_click:
+                st.session_state.last_click = new_pt
+                st.session_state.pts.append(new_pt)
+                st.rerun()
     else:
         # 4 points selected: show static chart (no click needed)
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
@@ -232,8 +236,9 @@ with col_ctrl:
     bc1,bc2 = st.columns(2)
     with bc1:
         if st.button("🔄 重設點位", use_container_width=True, disabled=(n==0)):
-            st.session_state.pts    = []
-            st.session_state.result = None
+            st.session_state.pts       = []
+            st.session_state.result    = None
+            st.session_state.last_click = None
             st.rerun()
     with bc2:
         prev_btn = st.button("👁️ 預覽截圖", use_container_width=True,
