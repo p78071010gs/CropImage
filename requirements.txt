@@ -2,6 +2,4 @@ streamlit>=1.32.0
 opencv-python-headless>=4.9.0
 numpy>=1.26.0
 Pillow>=10.0.0
-streamlit-drawable-canvas>=0.9.3
-plotly>=5.18.0
-streamlit-plotly-events>=0.0.6
+streamlit-image-coordinates>=0.4.0

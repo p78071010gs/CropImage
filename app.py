@@ -1,6 +1,7 @@
 """
 梯形裁剪工具
-使用 Plotly 圖表接收點擊座標（最可靠的跨版本做法）
+使用 streamlit-image-coordinates 套件接收點擊座標（原生支援，最穩定）
+若無此套件則 fallback 到純 HTML canvas + Streamlit component value
 """
 
 import streamlit as st
@@ -9,12 +10,17 @@ import numpy as np
 from PIL import Image
 import io, base64, json
 from datetime import datetime
-import plotly.graph_objects as go
-from streamlit_plotly_events import plotly_events
 
 st.set_page_config(page_title="梯形裁剪工具", page_icon="✂️", layout="wide")
 
-for k,v in [("pts",[]),("last_file",None),("result",None),("last_click",None)]:
+# ── Try importing streamlit-image-coordinates ──────────────────
+try:
+    from streamlit_image_coordinates import streamlit_image_coordinates
+    USE_SIC = True
+except ImportError:
+    USE_SIC = False
+
+for k, v in [("pts",[]),("last_file",None),("result",None)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -31,114 +37,63 @@ p,label{color:#94a3b8!important;}
 </style>
 """, unsafe_allow_html=True)
 
-COLORS   = ["#00c8ff","#64ff64","#ffb400","#ff50b4"]
-CV_COLS  = [(0,200,255),(100,255,100),(255,180,0),(255,80,180)]
-LABELS   = ["① 左上","② 右上","③ 右下","④ 左下"]
+COLORS  = ["#00c8ff","#64ff64","#ffb400","#ff50b4"]
+CV_COLS = [(0,200,255),(100,255,100),(255,180,0),(255,80,180)]
+LABELS  = ["① 左上","② 右上","③ 右下","④ 左下"]
+MAX_DISPLAY_W = 860
 
-# ════════════════════════════════════════════════════════════════
-def calc_size(w,h,max_w=860):
-    if w>max_w: s=max_w/w; return max_w,int(h*s),s
-    return w,h,1.0
-
-def pil_b64(img,fmt="JPEG",q=82):
-    buf=io.BytesIO(); img.save(buf,format=fmt,quality=q)
-    mime="image/jpeg" if fmt=="JPEG" else "image/png"
+# ─────────────────────────────────────────────
+def pil_b64(img, fmt="JPEG", q=85):
+    buf = io.BytesIO()
+    img.save(buf, format=fmt, quality=q)
+    mime = "image/jpeg" if fmt=="JPEG" else "image/png"
     return f"data:{mime};base64,"+base64.b64encode(buf.getvalue()).decode()
 
-def draw_overlay(bgr, pts, W, H):
-    img = bgr.copy(); n=len(pts)
+def draw_overlay(bgr, pts):
+    img = bgr.copy(); n = len(pts)
     for i in range(n-1):
         cv2.line(img,(int(pts[i][0]),int(pts[i][1])),
                      (int(pts[i+1][0]),int(pts[i+1][1])),(0,200,255),2,cv2.LINE_AA)
-    if n==4:
+    if n == 4:
         cv2.line(img,(int(pts[3][0]),int(pts[3][1])),
                      (int(pts[0][0]),int(pts[0][1])),(0,200,255),2,cv2.LINE_AA)
     for i,pt in enumerate(pts):
-        x,y=int(pt[0]),int(pt[1])
+        x,y = int(pt[0]),int(pt[1])
         cv2.circle(img,(x,y),12,CV_COLS[i],-1)
         cv2.circle(img,(x,y),12,(255,255,255),2,cv2.LINE_AA)
         cv2.putText(img,["①","②","③","④"][i],(x+15,y-4),
                     cv2.FONT_HERSHEY_SIMPLEX,.65,(0,255,255),2,cv2.LINE_AA)
     return img
 
-def make_plotly_fig(bgr, pts, W, H, clickable=True):
-    """Render image as Plotly figure; overlay selected points."""
-    rgb   = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    b64   = pil_b64(Image.fromarray(rgb))
-    fig   = go.Figure()
-
-    # Background image
-    fig.add_layout_image(dict(
-        source=b64, x=0, y=H, xanchor="left", yanchor="top",
-        xref="x", yref="y", sizex=W, sizey=H,
-        sizing="stretch", layer="below", opacity=1
-    ))
-
-    # Polygon lines
-    if len(pts)>=2:
-        xs=[p[0] for p in pts]; ys=[H-p[1] for p in pts]
-        closed_x = xs+[xs[0]] if len(pts)==4 else xs
-        closed_y = ys+[ys[0]] if len(pts)==4 else ys
-        fig.add_trace(go.Scatter(
-            x=closed_x, y=closed_y,
-            mode="lines", line=dict(color="#00c8ff",width=2),
-            hoverinfo="none", showlegend=False
-        ))
-
-    # Corner markers
-    for i,pt in enumerate(pts):
-        fig.add_trace(go.Scatter(
-            x=[pt[0]], y=[H-pt[1]],
-            mode="markers+text",
-            marker=dict(color=COLORS[i], size=14,
-                        line=dict(color="white",width=2)),
-            text=[["①","②","③","④"][i]],
-            textposition="top right",
-            textfont=dict(color="#00ffff", size=14),
-            hoverinfo="none", showlegend=False
-        ))
-
-    # Invisible scatter for click capture
-    if clickable:
-        fig.add_trace(go.Scatter(
-            x=[W/2], y=[H/2], mode="markers",
-            marker=dict(opacity=0, size=1),
-            hoverinfo="none", showlegend=False
-        ))
-
-    fig.update_layout(
-        xaxis=dict(range=[0,W], showgrid=False, zeroline=False,
-                   showticklabels=False, fixedrange=True),
-        yaxis=dict(range=[0,H], showgrid=False, zeroline=False,
-                   showticklabels=False, fixedrange=True, scaleanchor="x"),
-        margin=dict(l=0,r=0,t=0,b=0),
-        plot_bgcolor="#0f172a", paper_bgcolor="#0f172a",
-        dragmode="select" if not clickable else False,
-        height=min(H, 650),
-    )
-    return fig
+def resize_for_display(bgr, max_w=MAX_DISPLAY_W):
+    h,w = bgr.shape[:2]
+    if w > max_w:
+        s = max_w/w
+        bgr = cv2.resize(bgr,(max_w,int(h*s)),interpolation=cv2.INTER_AREA)
+        return bgr, s
+    return bgr, 1.0
 
 def perspective_crop(src, pts, W, H):
-    arr = np.array(pts,dtype="float32")
-    s=arr.sum(1); d=np.diff(arr,axis=1).flatten()
-    ordered=np.array([arr[np.argmin(s)],arr[np.argmin(d)],
-                      arr[np.argmax(s)],arr[np.argmax(d)]],dtype="float32")
-    tl,tr,br,bl=ordered
-    w=int(max(np.linalg.norm(tr-tl),np.linalg.norm(br-bl)))
-    h=int(max(np.linalg.norm(bl-tl),np.linalg.norm(br-tr)))
-    dst=np.array([[0,0],[w-1,0],[w-1,h-1],[0,h-1]],dtype="float32")
-    M=cv2.getPerspectiveTransform(ordered,dst)
-    return cv2.warpPerspective(src,M,(w,h))
+    arr = np.array(pts, dtype="float32")
+    s = arr.sum(1); d = np.diff(arr, axis=1).flatten()
+    ordered = np.array([arr[np.argmin(s)],arr[np.argmin(d)],
+                        arr[np.argmax(s)],arr[np.argmax(d)]], dtype="float32")
+    tl,tr,br,bl = ordered
+    w = int(max(np.linalg.norm(tr-tl),np.linalg.norm(br-bl)))
+    h = int(max(np.linalg.norm(bl-tl),np.linalg.norm(br-tr)))
+    dst = np.array([[0,0],[w-1,0],[w-1,h-1],[0,h-1]], dtype="float32")
+    M = cv2.getPerspectiveTransform(ordered, dst)
+    return cv2.warpPerspective(src, M, (w,h))
 
-def encode_result(img,fmt="jpg"):
-    if fmt=="jpg":  _,b=cv2.imencode(".jpg",img,[cv2.IMWRITE_JPEG_QUALITY,95])
-    elif fmt=="png": _,b=cv2.imencode(".png",img,[cv2.IMWRITE_PNG_COMPRESSION,3])
-    else:            _,b=cv2.imencode(".bmp",img)
+def encode_result(img, fmt="jpg"):
+    if fmt=="jpg":   _, b = cv2.imencode(".jpg",img,[cv2.IMWRITE_JPEG_QUALITY,95])
+    elif fmt=="png": _, b = cv2.imencode(".png",img,[cv2.IMWRITE_PNG_COMPRESSION,3])
+    else:            _, b = cv2.imencode(".bmp",img)
     return b.tobytes()
 
-# ════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
 # Sidebar
-# ════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 📂 上傳圖片")
     uploaded = st.file_uploader("", type=["jpg","jpeg","png","bmp","webp"],
@@ -154,14 +109,14 @@ with st.sidebar:
 if not uploaded:
     st.markdown("""
     <div style='text-align:center;padding:100px 0;color:#475569;'>
-        <div style='font-size:64px'>📂</div>
-        <div style='font-size:20px;margin-top:16px'>請從左側上傳圖片</div>
+      <div style='font-size:64px'>📂</div>
+      <div style='font-size:20px;margin-top:16px'>請從左側上傳圖片</div>
     </div>""", unsafe_allow_html=True)
     st.stop()
 
-# ════════════════════════════════════════════════════════════════
-# 讀圖
-# ════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
+# Load image
+# ─────────────────────────────────────────────
 raw      = np.frombuffer(uploaded.read(), np.uint8)
 original = cv2.imdecode(raw, cv2.IMREAD_COLOR)
 if original is None:
@@ -178,9 +133,9 @@ if st.session_state.last_file != uploaded.name:
 pts = st.session_state.pts
 n   = len(pts)
 
-# ════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
 # Layout
-# ════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
 st.title("✂️ 梯形裁剪 / 透視校正工具")
 col_img, col_ctrl = st.columns([5,2], gap="large")
 
@@ -191,31 +146,34 @@ with col_img:
             f"<span style='color:#64748b;font-size:12px'>已選 {n}/4</span>",
             unsafe_allow_html=True)
     else:
-        st.markdown("**✅ 已選取 4 個角點**")
+        st.markdown("**✅ 已選取 4 個角點，可點「預覽截圖」**")
 
-    fig = make_plotly_fig(original, pts, W, H, clickable=(n<4))
+    # Draw overlay onto display image
+    disp_bgr, scale = resize_for_display(original)
+    # Scale pts for display
+    disp_pts = [[p[0]*scale, p[1]*scale] for p in pts]
+    if pts:
+        disp_bgr = draw_overlay(disp_bgr, disp_pts)
 
-    if n < 4:
-        # Use a fixed key so the component is NOT recreated on rerun
-        clicked = plotly_events(fig, click_event=True, hover_event=False,
-                                select_event=False, key="plotly_click")
-        if clicked:
-            cx = clicked[0]["x"]
-            cy = H - clicked[0]["y"]   # plotly y is flipped
-            cx = max(0, min(W-1, int(round(cx))))
-            cy = max(0, min(H-1, int(round(cy))))
-            # Deduplicate: only append if this click differs from the last one
-            new_pt = [cx, cy]
-            if new_pt != st.session_state.last_click:
-                st.session_state.last_click = new_pt
-                st.session_state.pts.append(new_pt)
-                st.rerun()
+    disp_rgb = cv2.cvtColor(disp_bgr, cv2.COLOR_BGR2RGB)
+    disp_pil = Image.fromarray(disp_rgb)
+
+    if USE_SIC and n < 4:
+        # streamlit-image-coordinates: returns {"x":..,"y":..} on click, None otherwise
+        coord = streamlit_image_coordinates(disp_pil, key=f"sic_{n}")
+        if coord is not None:
+            # coord is in display pixels → convert back to original
+            ox = max(0, min(W-1, int(round(coord["x"] / scale))))
+            oy = max(0, min(H-1, int(round(coord["y"] / scale))))
+            st.session_state.pts.append([ox, oy])
+            st.rerun()
     else:
-        # 4 points selected: show static chart (no click needed)
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar":False})
+        # Fallback: plain image display (no click)
+        st.image(disp_pil, use_container_width=True)
+        if not USE_SIC and n < 4:
+            st.warning("請安裝 `streamlit-image-coordinates` 套件以啟用點擊功能：\n```\npip install streamlit-image-coordinates\n```")
 
 with col_ctrl:
-    # 座標表
     st.markdown("#### 📍 角點座標（原圖 px）")
     if n == 0:
         st.caption("尚未選取任何點")
@@ -236,15 +194,14 @@ with col_ctrl:
     bc1,bc2 = st.columns(2)
     with bc1:
         if st.button("🔄 重設點位", use_container_width=True, disabled=(n==0)):
-            st.session_state.pts       = []
-            st.session_state.result    = None
-            st.session_state.last_click = None
+            st.session_state.pts    = []
+            st.session_state.result = None
             st.rerun()
     with bc2:
         prev_btn = st.button("👁️ 預覽截圖", use_container_width=True,
                              type="primary", disabled=(n<4))
 
-    if prev_btn and n==4:
+    if prev_btn and n == 4:
         with st.spinner("透視校正中..."):
             st.session_state.result = perspective_crop(original, pts, W, H)
 
@@ -258,8 +215,8 @@ with col_ctrl:
             <div style='margin-top:8px;font-size:12px'>{hint}</div></div>""",
             unsafe_allow_html=True)
     else:
-        res     = st.session_state.result
-        rH,rW   = res.shape[:2]
+        res   = st.session_state.result
+        rH,rW = res.shape[:2]
         st.success(f"輸出：{rW} × {rH} px")
         st.image(cv2.cvtColor(res,cv2.COLOR_BGR2RGB), use_container_width=True)
         fe  = (fmt if "fmt" in dir() else "JPG").lower()
