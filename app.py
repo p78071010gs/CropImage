@@ -37,12 +37,13 @@ p,label{color:#94a3b8!important;}
 </style>
 """, unsafe_allow_html=True)
 
-COLORS  = ["#00c8ff","#64ff64","#ffb400","#ff50b4"]
-#            ①藍       ②綠       ③橘       ④粉
+COLORS   = ["#00c8ff","#64ff64","#ffb400","#ff50b4"]
+#             TL藍      TR綠      BR橘      BL粉
 # OpenCV BGR：#00c8ff→(255,200,0) #64ff64→(100,255,100) #ffb400→(0,180,255) #ff50b4→(180,80,255)
-CV_COLS = [(255,200,0),(100,255,100),(0,180,255),(180,80,255)]
-LABELS  = ["① 左上","② 右上","③ 右下","④ 左下"]
-MAX_DISPLAY_W = 860
+CV_COLS  = [(255,200,0),(100,255,100),(0,180,255),(180,80,255)]
+LABELS   = ["TL 左上","TR 右上","BR 右下","BL 左下"]
+CV_LABELS= ["TL","TR","BR","BL"]   # OpenCV putText 用（純 ASCII）
+MAX_DISPLAY_W = 1400   # 放寬上限，讓圖片盡量填滿全寬
 
 # ─────────────────────────────────────────────
 def pil_b64(img, fmt="JPEG", q=85):
@@ -63,8 +64,8 @@ def draw_overlay(bgr, pts):
         x,y = int(pt[0]),int(pt[1])
         cv2.circle(img,(x,y),12,CV_COLS[i],-1)
         cv2.circle(img,(x,y),12,(255,255,255),2,cv2.LINE_AA)
-        cv2.putText(img,["①","②","③","④"][i],(x+15,y-4),
-                    cv2.FONT_HERSHEY_SIMPLEX,.65,(0,255,255),2,cv2.LINE_AA)
+        cv2.putText(img, CV_LABELS[i], (x+15, y+5),
+                    cv2.FONT_HERSHEY_SIMPLEX, .65, (255,255,255), 2, cv2.LINE_AA)
     return img
 
 def resize_for_display(bgr, max_w=MAX_DISPLAY_W):
@@ -106,7 +107,7 @@ with st.sidebar:
         fmt = st.radio("fmt",["JPG","PNG","BMP"],horizontal=True,
                        label_visibility="collapsed")
         st.markdown("---")
-        st.info("**步驟**\n1. 點擊圖片選 4 個角點\n2. 點「👁️ 預覽」確認\n3. 點「⬇️ 下載」儲存")
+        st.info("**步驟**\n1. 點擊圖片選 4 個角點\n2. 輸入數字微調座標\n3. 點「👁️ 預覽」確認\n4. 點「⬇️ 下載」儲存")
 
 if not uploaded:
     st.markdown("""
@@ -136,46 +137,13 @@ pts = st.session_state.pts
 n   = len(pts)
 
 # ─────────────────────────────────────────────
-# Layout
+# Layout：圖片全寬，控制面板在側欄
 # ─────────────────────────────────────────────
 st.title("✂️ 梯形裁剪 / 透視校正工具")
-col_img, col_ctrl = st.columns([5,2], gap="large")
 
-with col_img:
-    if n < 4:
-        st.markdown(
-            f"**🖱️ 點擊圖片選取第 {n+1} 個角點：{LABELS[n]}**　"
-            f"<span style='color:#64748b;font-size:12px'>已選 {n}/4</span>",
-            unsafe_allow_html=True)
-    else:
-        st.markdown("**✅ 已選取 4 個角點，可點「預覽截圖」**")
-
-    # Draw overlay onto display image
-    disp_bgr, scale = resize_for_display(original)
-    # Scale pts for display
-    disp_pts = [[p[0]*scale, p[1]*scale] for p in pts]
-    if pts:
-        disp_bgr = draw_overlay(disp_bgr, disp_pts)
-
-    disp_rgb = cv2.cvtColor(disp_bgr, cv2.COLOR_BGR2RGB)
-    disp_pil = Image.fromarray(disp_rgb)
-
-    if USE_SIC and n < 4:
-        # streamlit-image-coordinates: returns {"x":..,"y":..} on click, None otherwise
-        coord = streamlit_image_coordinates(disp_pil, key=f"sic_{n}")
-        if coord is not None:
-            # coord is in display pixels → convert back to original
-            ox = max(0, min(W-1, int(round(coord["x"] / scale))))
-            oy = max(0, min(H-1, int(round(coord["y"] / scale))))
-            st.session_state.pts.append([ox, oy])
-            st.rerun()
-    else:
-        # Fallback: plain image display (no click)
-        st.image(disp_pil, use_container_width=True)
-        if not USE_SIC and n < 4:
-            st.warning("請安裝 `streamlit-image-coordinates` 套件以啟用點擊功能：\n```\npip install streamlit-image-coordinates\n```")
-
-with col_ctrl:
+# ── 側欄：角點微調 + 操作按鈕 + 裁剪結果 ──
+with st.sidebar:
+    st.markdown("---")
     st.markdown("#### 📍 角點座標微調（原圖 px）")
 
     if n == 0:
@@ -183,21 +151,19 @@ with col_ctrl:
     else:
         changed = False
         for i, p in enumerate(pts):
-            dot = f"<span style='display:inline-block;width:11px;height:11px;" \
-                  f"border-radius:50%;background:{COLORS[i]};margin-right:6px;" \
-                  f"vertical-align:middle;'></span>"
+            dot = (f"<span style='display:inline-block;width:11px;height:11px;"
+                   f"border-radius:50%;background:{COLORS[i]};margin-right:6px;"
+                   f"vertical-align:middle;'></span>")
             st.markdown(f"{dot}**{LABELS[i]}**", unsafe_allow_html=True)
             cx, cy = st.columns(2)
             with cx:
-                new_x = st.number_input(
-                    "X", min_value=0, max_value=W-1,
-                    value=int(p[0]), step=1,
-                    key=f"nx_{i}", label_visibility="visible")
+                new_x = st.number_input("X", min_value=0, max_value=W-1,
+                                        value=int(p[0]), step=1,
+                                        key=f"nx_{i}", label_visibility="visible")
             with cy:
-                new_y = st.number_input(
-                    "Y", min_value=0, max_value=H-1,
-                    value=int(p[1]), step=1,
-                    key=f"ny_{i}", label_visibility="visible")
+                new_y = st.number_input("Y", min_value=0, max_value=H-1,
+                                        value=int(p[1]), step=1,
+                                        key=f"ny_{i}", label_visibility="visible")
             if new_x != int(p[0]) or new_y != int(p[1]):
                 st.session_state.pts[i] = [new_x, new_y]
                 changed = True
@@ -226,9 +192,9 @@ with col_ctrl:
     st.markdown("#### ✂️ 裁剪結果")
     if st.session_state.result is None:
         hint = "點圖選 4 個角點後點「預覽截圖」" if n < 4 else "點擊「👁️ 預覽截圖」"
-        st.markdown(f"""<div style='background:#1e293b;border-radius:8px;padding:30px;
+        st.markdown(f"""<div style='background:#1e293b;border-radius:8px;padding:20px;
             text-align:center;color:#475569;'>
-            <div style='font-size:32px'>🖼️</div>
+            <div style='font-size:28px'>🖼️</div>
             <div style='margin-top:8px;font-size:12px'>{hint}</div></div>""",
             unsafe_allow_html=True)
     else:
@@ -244,3 +210,33 @@ with col_ctrl:
             file_name=f"{fname}_crop_{ts}.{fe}",
             mime={"jpg":"image/jpeg","png":"image/png","bmp":"image/bmp"}.get(fe,"image/jpeg"),
             use_container_width=True, type="primary")
+
+# ── 主區域：全寬圖片 ──
+if n < 4:
+    st.markdown(
+        f"**🖱️ 點擊圖片選取第 {n+1} 個角點：{LABELS[n]}**　"
+        f"<span style='color:#64748b;font-size:12px'>已選 {n}/4</span>",
+        unsafe_allow_html=True)
+else:
+    st.markdown("**✅ 已選取 4 個角點 — 可在左側輸入框微調，或點「👁️ 預覽截圖」**")
+
+# 繪製 overlay
+disp_bgr, scale = resize_for_display(original)
+disp_pts = [[p[0]*scale, p[1]*scale] for p in pts]
+if pts:
+    disp_bgr = draw_overlay(disp_bgr, disp_pts)
+
+disp_rgb = cv2.cvtColor(disp_bgr, cv2.COLOR_BGR2RGB)
+disp_pil = Image.fromarray(disp_rgb)
+
+if USE_SIC and n < 4:
+    coord = streamlit_image_coordinates(disp_pil, key=f"sic_{n}", use_column_width=True)
+    if coord is not None:
+        ox = max(0, min(W-1, int(round(coord["x"] / scale))))
+        oy = max(0, min(H-1, int(round(coord["y"] / scale))))
+        st.session_state.pts.append([ox, oy])
+        st.rerun()
+else:
+    st.image(disp_pil, use_container_width=True)
+    if not USE_SIC and n < 4:
+        st.warning("請安裝 `streamlit-image-coordinates` 套件以啟用點擊功能：\n```\npip install streamlit-image-coordinates\n```")
