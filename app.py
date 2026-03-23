@@ -7,35 +7,10 @@ import streamlit as st
 import cv2
 import numpy as np
 from PIL import Image
+from streamlit_drawable_canvas import st_canvas
 import io
 import base64
 from datetime import datetime
-
-# ── Compatibility patch ───────────────────────────────────────────────────────
-# streamlit-drawable-canvas calls st.image_to_url() with the old 5-arg
-# signature that was removed in Streamlit ≥ 1.37.  We replace it with a
-# version that converts the PIL Image to a base64 data-URL itself so the
-# rest of the canvas library (including _resize_img) still receives a PIL
-# Image and only the final URL step is patched.
-import streamlit_drawable_canvas as _sdc_module
-import streamlit_drawable_canvas.__init__ as _sdc_init  # noqa: F401
-
-def _patched_image_to_url(image, width, clamp, channels, output_format, image_id=""):
-    buf = io.BytesIO()
-    if not isinstance(image, Image.Image):
-        image = Image.fromarray(image)
-    image.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    return f"data:image/png;base64,{b64}"
-
-# Patch the reference used inside the canvas package
-import streamlit_drawable_canvas.__init__ as _sdc
-import streamlit.elements.image as _st_image_mod
-_st_image_mod.image_to_url = _patched_image_to_url   # module-level ref
-_sdc.st_image.image_to_url = _patched_image_to_url   # local alias inside canvas
-# ─────────────────────────────────────────────────────────────────────────────
-
-from streamlit_drawable_canvas import st_canvas
 
 st.set_page_config(page_title="梯形裁剪工具", page_icon="✂️", layout="wide")
 
@@ -96,30 +71,71 @@ def calc_canvas_size(img_w, img_h, max_w=820):
         return max_w, int(img_h * s), s
     return img_w, img_h, 1.0
 
+def pil_to_data_url(pil_img):
+    """Convert PIL Image to base64 JPEG data URL."""
+    buf = io.BytesIO()
+    pil_img.save(buf, format="JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+def build_fabric_objects(bg_data_url, canvas_w, canvas_h, pts_canvas):
+    """
+    Build fabric.js JSON with a locked background image + draggable corner circles.
+    Avoids the broken background_image parameter in st_canvas entirely.
+    """
+    CORNER_COLORS = ["#00c8ff", "#64ff64", "#ffb400", "#ff50b4"]
+    objects = [
+        {
+            "type": "image",
+            "version": "4.4.0",
+            "originX": "left",
+            "originY": "top",
+            "left": 0, "top": 0,
+            "width": canvas_w, "height": canvas_h,
+            "scaleX": 1, "scaleY": 1,
+            "src": bg_data_url,
+            "selectable": False,
+            "evented": False,
+            "lockMovementX": True,
+            "lockMovementY": True,
+            "hasControls": False,
+            "hasBorders": False,
+            "crossOrigin": "anonymous",
+        }
+    ]
+    for i, pt in enumerate(pts_canvas):
+        objects.append({
+            "type": "circle",
+            "version": "4.4.0",
+            "originX": "left",
+            "originY": "top",
+            "left":   pt[0] - 10,
+            "top":    pt[1] - 10,
+            "width":  20, "height": 20,
+            "radius": 10,
+            "fill":   CORNER_COLORS[i],
+            "stroke": "white",
+            "strokeWidth": 2,
+            "selectable": True,
+            "evented": True,
+        })
+    return {"version": "4.4.0", "objects": objects}
+
 def draw_polygon_on_pil(pil_img, pts_canvas, scale):
-    """在 PIL 圖上畫框線（回傳給 canvas 背景用）"""
-    import cv2, numpy as np
+    """Draw selection polygon lines onto the image."""
     bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     if len(pts_canvas) >= 2:
-        for i in range(len(pts_canvas)-1):
+        for i in range(len(pts_canvas) - 1):
             cv2.line(bgr,
-                     (int(pts_canvas[i][0]), int(pts_canvas[i][1])),
+                     (int(pts_canvas[i][0]),   int(pts_canvas[i][1])),
                      (int(pts_canvas[i+1][0]), int(pts_canvas[i+1][1])),
-                     (0,200,255), 2, cv2.LINE_AA)
+                     (0, 200, 255), 2, cv2.LINE_AA)
     if len(pts_canvas) == 4:
         cv2.line(bgr,
                  (int(pts_canvas[3][0]), int(pts_canvas[3][1])),
                  (int(pts_canvas[0][0]), int(pts_canvas[0][1])),
-                 (0,200,255), 2, cv2.LINE_AA)
-    labels = ["①","②","③","④"]
-    colors = [(0,200,255),(100,255,100),(255,180,0),(255,80,180)]
-    for i, pt in enumerate(pts_canvas):
-        x, y = int(pt[0]), int(pt[1])
-        cv2.circle(bgr, (x,y), 10, colors[i], -1)
-        cv2.circle(bgr, (x,y), 10, (255,255,255), 1, cv2.LINE_AA)
-        cv2.putText(bgr, labels[i], (x+13, y-6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0,255,255), 1, cv2.LINE_AA)
+                 (0, 200, 255), 2, cv2.LINE_AA)
     return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+
 
 # ════════════════════════════════════════════════════════════════
 # 標題
@@ -133,7 +149,7 @@ with st.sidebar:
     st.markdown("## 📂 上傳圖片")
     uploaded = st.file_uploader(
         "支援 JPG、PNG、BMP、WEBP",
-        type=["jpg","jpeg","png","bmp","webp"],
+        type=["jpg", "jpeg", "png", "bmp", "webp"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -152,7 +168,7 @@ with st.sidebar:
 
     if uploaded:
         st.markdown("**輸出格式**")
-        fmt = st.radio("格式", ["JPG","PNG","BMP"], horizontal=True,
+        fmt = st.radio("格式", ["JPG", "PNG", "BMP"], horizontal=True,
                        label_visibility="collapsed")
         st.markdown("---")
         if st.button("🔄 重置角點", use_container_width=True):
@@ -176,8 +192,8 @@ original   = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 if original is None:
     st.error("無法讀取圖片，請換一個檔案。"); st.stop()
 
-H, W       = original.shape[:2]
-fname_base = uploaded.name.rsplit(".", 1)[0]
+H, W          = original.shape[:2]
+fname_base    = uploaded.name.rsplit(".", 1)[0]
 cW, cH, scale = calc_canvas_size(W, H, max_w=820)
 
 # session state 初始化
@@ -191,7 +207,7 @@ if st.session_state.last_file != uploaded.name:
     st.session_state.pts_canvas = []
     st.session_state.last_file  = uploaded.name
 
-pts_canvas = st.session_state.pts_canvas  # list of [x,y] in canvas coords
+pts_canvas = st.session_state.pts_canvas
 
 # ════════════════════════════════════════════════════════════════
 # 主畫面
@@ -206,51 +222,41 @@ with col_canvas:
     else:
         st.markdown("**✅ 4個角點已選取，可拖曳圓點微調位置**")
 
-    # 背景圖（帶框線）
-    pil_orig = Image.fromarray(cv2.cvtColor(
+    # Build background: draw polygon lines onto the resized photo
+    pil_resized = Image.fromarray(cv2.cvtColor(
         cv2.resize(original, (cW, cH)), cv2.COLOR_BGR2RGB))
-    bg_img = draw_polygon_on_pil(pil_orig, pts_canvas, scale) if pts_canvas else pil_orig
+    bg_pil = draw_polygon_on_pil(pil_resized, pts_canvas, scale) if pts_canvas else pil_resized
 
-    # Canvas 物件清單：每個角點畫一個可拖曳的圓
-    CORNER_COLORS = ["#00c8ff","#64ff64","#ffb400","#ff50b4"]
-    objects = []
-    for i, pt in enumerate(pts_canvas):
-        objects.append({
-            "type": "circle",
-            "version": "4.4.0",
-            "left":   pt[0] - 10,
-            "top":    pt[1] - 10,
-            "width":  20, "height": 20,
-            "fill":   CORNER_COLORS[i],
-            "stroke": "white", "strokeWidth": 2,
-            "selectable": True,
-        })
+    # Embed background + corner circles entirely inside initial_drawing.
+    # background_image=None avoids the broken image_to_url code path.
+    bg_url         = pil_to_data_url(bg_pil)
+    fabric_drawing = build_fabric_objects(bg_url, cW, cH, pts_canvas)
 
     canvas_result = st_canvas(
-        fill_color   = "rgba(0,0,0,0)",
-        stroke_color = "#00c8ff",
-        stroke_width = 2,
-        background_image = bg_img,
-        update_streamlit = True,
-        width  = cW,
-        height = cH,
-        drawing_mode = "point" if n < 4 else "transform",
+        fill_color           = "rgba(0,0,0,0)",
+        stroke_color         = "#00c8ff",
+        stroke_width         = 2,
+        background_image     = None,
+        update_streamlit     = True,
+        width                = cW,
+        height               = cH,
+        drawing_mode         = "point" if n < 4 else "transform",
         point_display_radius = 10,
-        initial_drawing = {"version": "4.4.0", "objects": objects} if objects else None,
-        key = "canvas_main",
+        initial_drawing      = fabric_drawing,
+        key                  = "canvas_main",
     )
 
-    # 解析 canvas 回傳
+    # Parse canvas output
     if canvas_result.json_data is not None:
         objs = canvas_result.json_data.get("objects", [])
-        # 新點擊（point 模式）
+        # New clicks (point mode) — ignore the background image object
         new_pts = [o for o in objs if o.get("type") == "point"]
         if new_pts and n < 4:
             for p in new_pts:
                 if len(st.session_state.pts_canvas) < 4:
                     st.session_state.pts_canvas.append([p["left"], p["top"]])
             st.rerun()
-        # 拖曳（transform 模式，circle 物件）
+        # Dragged circles (transform mode)
         moved = [o for o in objs if o.get("type") == "circle"]
         if moved and n == 4:
             new_list = []
@@ -277,7 +283,6 @@ with col_result:
         </div>
         """, unsafe_allow_html=True)
     else:
-        # 轉回原始座標
         pts_orig = [(x / scale, y / scale) for x, y in pts_canvas]
 
         if st.button("🚀 執行裁剪", type="primary", use_container_width=True):
@@ -288,8 +293,8 @@ with col_result:
             st.session_state.result_dim = (rW, rH)
 
         if "result" in st.session_state:
-            result   = st.session_state.result
-            rW, rH   = st.session_state.result_dim
+            result = st.session_state.result
+            rW, rH = st.session_state.result_dim
             st.success(f"完成！{rW} × {rH} px")
             st.image(cv2.cvtColor(result, cv2.COLOR_BGR2RGB),
                      use_container_width=True)
@@ -297,12 +302,12 @@ with col_result:
             fmt_ext  = fmt.lower() if "fmt" in dir() else "jpg"
             ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
             dl_name  = f"{fname_base}_crop_{ts}.{fmt_ext}"
-            mime_map = {"jpg":"image/jpeg","png":"image/png","bmp":"image/bmp"}
+            mime_map = {"jpg": "image/jpeg", "png": "image/png", "bmp": "image/bmp"}
 
             st.download_button(
-                label    = f"⬇️ 下載 {fmt_ext.upper()}",
-                data     = img_to_bytes(result, fmt_ext),
-                file_name= dl_name,
-                mime     = mime_map.get(fmt_ext, "image/jpeg"),
+                label               = f"⬇️ 下載 {fmt_ext.upper()}",
+                data                = img_to_bytes(result, fmt_ext),
+                file_name           = dl_name,
+                mime                = mime_map.get(fmt_ext, "image/jpeg"),
                 use_container_width = True,
             )
