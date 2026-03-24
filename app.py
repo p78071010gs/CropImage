@@ -44,7 +44,8 @@ CV_COLS  = [(255,200,0),(100,255,100),(0,180,255),(180,80,255)]
 LABELS   = ["TL 左上","TR 右上","BR 右下","BL 左下"]
 CV_LABELS= ["TL","TR","BR","BL"]   # OpenCV putText 用（純 ASCII）
 MAX_DISPLAY_W = 1000   # 放寬上限，讓圖片顯示合理大小
-SIC_DISPLAY_W = 1000   # streamlit-image-coordinates 固定渲染寬度（與 scale 對齊）VIEWPORT_MAX_W = 1000  # 圖片在畫面內最大寬度，避免超出視窗
+SIC_DISPLAY_W = 1000   # streamlit-image-coordinates 固定渲染寬度（與 scale 對齊）
+VIEWPORT_MAX_W = 1000  # 圖片在畫面內最大寬度，避免超出視窗
 # ─────────────────────────────────────────────
 def pil_b64(img, fmt="JPEG", q=85):
     buf = io.BytesIO()
