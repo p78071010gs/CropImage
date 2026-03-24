@@ -257,6 +257,6 @@ if USE_SIC and n < 4:
         st.session_state.pts.append([ox, oy])
         st.rerun()
 else:
-    st.image(disp_pil, use_container_width=True)
+    st.image(disp_pil, width=disp_w)
     if not USE_SIC and n < 4:
         st.warning("請安裝 `streamlit-image-coordinates` 套件以啟用點擊功能：\n```\npip install streamlit-image-coordinates\n```")
