@@ -43,8 +43,8 @@ COLORS   = ["#00c8ff","#64ff64","#ffb400","#ff50b4"]
 CV_COLS  = [(255,200,0),(100,255,100),(0,180,255),(180,80,255)]
 LABELS   = ["TL 左上","TR 右上","BR 右下","BL 左下"]
 CV_LABELS= ["TL","TR","BR","BL"]   # OpenCV putText 用（純 ASCII）
-MAX_DISPLAY_W = 1200   # 放寬上限，讓圖片顯示合理大小
-SIC_DISPLAY_W = 1200   # streamlit-image-coordinates 固定渲染寬度（與 scale 對齊）
+MAX_DISPLAY_W = 1100   # 放寬上限，讓圖片顯示合理大小
+SIC_DISPLAY_W = 1100   # streamlit-image-coordinates 固定渲染寬度（與 scale 對齊）
 
 # ─────────────────────────────────────────────
 def pil_b64(img, fmt="JPEG", q=85):
